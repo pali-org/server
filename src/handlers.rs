@@ -2,70 +2,333 @@
 // TODO: Add request validation middleware
 // TODO: Implement rate limiting per API key
 // TODO: Add comprehensive error logging
-// TODO: Figure out how to access Env/D1 in Workers Axum handlers
 
-use axum::{
-    extract::{Path, Query},
-    http::StatusCode,
-    response::IntoResponse,
-    Json,
-};
-use serde::Deserialize;
+use worker::*;
+use crate::models::*;
+use crate::db::Database;
 
-#[derive(Deserialize)]
-pub struct TodoQuery {
-    pub completed: Option<bool>,
+// Simple sync handlers for basic routes
+pub fn root(_: Request, _: RouteContext<()>) -> Result<Response> {
+    Response::ok("Pali Server API v1.0 - Self-hosted todo management")
 }
 
-#[derive(Deserialize)]
-pub struct SearchQuery {
-    pub q: String,
+pub fn health_check(_: Request, _: RouteContext<()>) -> Result<Response> {
+    Response::ok("OK")
 }
 
-// Placeholder handlers - need to figure out Env access in Workers Axum
-// TODO: Research Workers Axum integration for accessing D1 database
+// Async handlers for database operations
+pub async fn create_todo(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    // TODO: Add authentication check
+    
+    let body: CreateTodoRequest = match req.json().await {
+        Ok(body) => body,
+        Err(_) => {
+            return Ok(Response::from_json(&ApiResponse::<()>::error("Invalid JSON body".to_string()))
+                ?.with_status(400));
+        }
+    };
+    
+    let d1 = match ctx.env.d1("DB") {
+        Ok(db) => db,
+        Err(_) => {
+            return Ok(Response::from_json(&ApiResponse::<()>::error("Database not configured".to_string()))?
+                .with_status(500));
+        }
+    };
 
-pub async fn create_todo() -> impl IntoResponse {
-    (StatusCode::NOT_IMPLEMENTED, Json("TODO: Implement create_todo handler"))
+    let db = Database::new(d1);
+    
+    match db.create_todo(body).await {
+        Ok(todo) => Ok(Response::from_json(&ApiResponse::success(todo))?),
+        Err(e) => Ok(Response::from_json(&ApiResponse::<()>::error(format!("Failed to create todo: {}", e)))?
+            .with_status(500)),
+    }
 }
 
-pub async fn list_todos() -> impl IntoResponse {
-    (StatusCode::NOT_IMPLEMENTED, Json("TODO: Implement list_todos handler"))
+pub async fn list_todos(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    // TODO: Add authentication check
+    
+    // Parse query parameters manually
+    let url = req.url()?;
+    let completed_filter = url.query_pairs()
+        .find(|(key, _)| key == "completed")
+        .and_then(|(_, value)| value.parse::<bool>().ok());
+    
+    let d1 = match ctx.env.d1("DB") {
+        Ok(db) => db,
+        Err(_) => {
+            return Ok(Response::from_json(&ApiResponse::<Vec<Todo>>::error("Database not configured".to_string()))?
+                .with_status(500));
+        }
+    };
+
+    let db = Database::new(d1);
+    
+    match db.list_todos(completed_filter).await {
+        Ok(todos) => Ok(Response::from_json(&ApiResponse::success(todos))?),
+        Err(e) => Ok(Response::from_json(&ApiResponse::<()>::error(format!("Failed to list todos: {}", e)))?
+            .with_status(500)),
+    }
 }
 
-pub async fn search_todos() -> impl IntoResponse {
-    (StatusCode::NOT_IMPLEMENTED, Json("TODO: Implement search_todos handler"))
+pub async fn search_todos(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    // TODO: Add authentication check
+    
+    let url = req.url()?;
+    let query = match url.query_pairs().find(|(key, _)| key == "q") {
+        Some((_, value)) => value.to_string(),
+        None => {
+            return Ok(Response::from_json(&ApiResponse::<()>::error("Missing 'q' query parameter".to_string()))?
+                .with_status(400));
+        }
+    };
+    
+    let d1 = match ctx.env.d1("DB") {
+        Ok(db) => db,
+        Err(_) => {
+            return Ok(Response::from_json(&ApiResponse::<Vec<Todo>>::error("Database not configured".to_string()))?
+                .with_status(500));
+        }
+    };
+
+    let db = Database::new(d1);
+    
+    match db.search_todos(&query).await {
+        Ok(todos) => Ok(Response::from_json(&ApiResponse::success(todos))?),
+        Err(e) => Ok(Response::from_json(&ApiResponse::<()>::error(format!("Failed to search todos: {}", e)))?
+            .with_status(500)),
+    }
 }
 
-pub async fn get_todo(Path(_id): Path<String>) -> impl IntoResponse {
-    (StatusCode::NOT_IMPLEMENTED, Json("TODO: Implement get_todo handler"))
+pub async fn get_todo(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    // TODO: Add authentication check
+    
+    let id = match ctx.param("id") {
+        Some(id) => id,
+        None => {
+            return Ok(Response::from_json(&ApiResponse::<()>::error("Missing todo ID".to_string()))?
+                .with_status(400));
+        }
+    };
+    
+    let d1 = match ctx.env.d1("DB") {
+        Ok(db) => db,
+        Err(_) => {
+            return Ok(Response::from_json(&ApiResponse::<Todo>::error("Database not configured".to_string()))?
+                .with_status(500));
+        }
+    };
+
+    let db = Database::new(d1);
+    
+    match db.get_todo(id).await {
+        Ok(Some(todo)) => Ok(Response::from_json(&ApiResponse::success(todo))?),
+        Ok(None) => Ok(Response::from_json(&ApiResponse::<()>::error("Todo not found".to_string()))?
+            .with_status(404)),
+        Err(e) => Ok(Response::from_json(&ApiResponse::<()>::error(format!("Failed to get todo: {}", e)))?
+            .with_status(500)),
+    }
 }
 
-pub async fn update_todo(Path(_id): Path<String>) -> impl IntoResponse {
-    (StatusCode::NOT_IMPLEMENTED, Json("TODO: Implement update_todo handler"))
+pub async fn update_todo(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    // TODO: Add authentication check
+    
+    let id = match ctx.param("id") {
+        Some(id) => id,
+        None => {
+            return Ok(Response::from_json(&ApiResponse::<()>::error("Missing todo ID".to_string()))?
+                .with_status(400));
+        }
+    };
+    
+    let body: UpdateTodoRequest = match req.json().await {
+        Ok(body) => body,
+        Err(_) => {
+            return Ok(Response::from_json(&ApiResponse::<()>::error("Invalid JSON body".to_string()))?
+                .with_status(400));
+        }
+    };
+    
+    let d1 = match ctx.env.d1("DB") {
+        Ok(db) => db,
+        Err(_) => {
+            return Ok(Response::from_json(&ApiResponse::<Todo>::error("Database not configured".to_string()))?
+                .with_status(500));
+        }
+    };
+
+    let db = Database::new(d1);
+    
+    match db.update_todo(id, body).await {
+        Ok(Some(todo)) => Ok(Response::from_json(&ApiResponse::success(todo))?),
+        Ok(None) => Ok(Response::from_json(&ApiResponse::<()>::error("Todo not found".to_string()))?
+            .with_status(404)),
+        Err(e) => Ok(Response::from_json(&ApiResponse::<()>::error(format!("Failed to update todo: {}", e)))?
+            .with_status(500)),
+    }
 }
 
-pub async fn delete_todo(Path(_id): Path<String>) -> impl IntoResponse {
-    (StatusCode::NOT_IMPLEMENTED, Json("TODO: Implement delete_todo handler"))
+pub async fn delete_todo(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    // TODO: Add authentication check
+    
+    let id = match ctx.param("id") {
+        Some(id) => id,
+        None => {
+            return Ok(Response::from_json(&ApiResponse::<()>::error("Missing todo ID".to_string()))?
+                .with_status(400));
+        }
+    };
+    
+    let d1 = match ctx.env.d1("DB") {
+        Ok(db) => db,
+        Err(_) => {
+            return Ok(Response::from_json(&ApiResponse::<()>::error("Database not configured".to_string()))?
+                .with_status(500));
+        }
+    };
+
+    let db = Database::new(d1);
+    
+    match db.delete_todo(id).await {
+        Ok(true) => Ok(Response::from_json(&ApiResponse::success(()))?),
+        Ok(false) => Ok(Response::from_json(&ApiResponse::<()>::error("Todo not found".to_string()))?
+            .with_status(404)),
+        Err(e) => Ok(Response::from_json(&ApiResponse::<()>::error(format!("Failed to delete todo: {}", e)))?
+            .with_status(500)),
+    }
 }
 
-pub async fn toggle_todo(Path(_id): Path<String>) -> impl IntoResponse {
-    (StatusCode::NOT_IMPLEMENTED, Json("TODO: Implement toggle_todo handler"))
+pub async fn toggle_todo(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    // TODO: Add authentication check
+    
+    let id = match ctx.param("id") {
+        Some(id) => id,
+        None => {
+            return Ok(Response::from_json(&ApiResponse::<()>::error("Missing todo ID".to_string()))?
+                .with_status(400));
+        }
+    };
+    
+    let d1 = match ctx.env.d1("DB") {
+        Ok(db) => db,
+        Err(_) => {
+            return Ok(Response::from_json(&ApiResponse::<Todo>::error("Database not configured".to_string()))?
+                .with_status(500));
+        }
+    };
+
+    let db = Database::new(d1);
+    
+    match db.toggle_todo(id).await {
+        Ok(Some(todo)) => Ok(Response::from_json(&ApiResponse::success(todo))?),
+        Ok(None) => Ok(Response::from_json(&ApiResponse::<()>::error("Todo not found".to_string()))?
+            .with_status(404)),
+        Err(e) => Ok(Response::from_json(&ApiResponse::<()>::error(format!("Failed to toggle todo: {}", e)))?
+            .with_status(500)),
+    }
 }
 
 // Admin handlers
-pub async fn rotate_admin_key() -> impl IntoResponse {
-    (StatusCode::NOT_IMPLEMENTED, Json("TODO: Implement rotate_admin_key handler"))
+pub async fn rotate_admin_key(_req: Request, _ctx: RouteContext<()>) -> Result<Response> {
+    // TODO: Add admin authentication check
+    
+    Ok(Response::from_json(&ApiResponse::<()>::error("Not implemented yet".to_string()))?
+        .with_status(501))
 }
 
-pub async fn create_api_key() -> impl IntoResponse {
-    (StatusCode::NOT_IMPLEMENTED, Json("TODO: Implement create_api_key handler"))
+pub async fn create_api_key(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    // TODO: Add admin authentication check
+    
+    let body: CreateApiKeyRequest = match req.json().await {
+        Ok(body) => body,
+        Err(_) => {
+            return Ok(Response::from_json(&ApiResponse::<()>::error("Invalid JSON body".to_string()))?
+                .with_status(400));
+        }
+    };
+    
+    let d1 = match ctx.env.d1("DB") {
+        Ok(db) => db,
+        Err(_) => {
+            return Ok(Response::from_json(&ApiResponse::<ApiKeyResponse>::error("Database not configured".to_string()))?
+                .with_status(500));
+        }
+    };
+
+    let db = Database::new(d1);
+    let api_key = generate_api_key();
+    let key_hash = hash_api_key(&api_key);
+    
+    match db.create_api_key(key_hash, body.client_name.clone(), body.key_type.clone()).await {
+        Ok(id) => {
+            let response = ApiKeyResponse {
+                id,
+                client_name: body.client_name,
+                key_type: body.key_type,
+                api_key,
+                created_at: chrono::Utc::now().timestamp(),
+            };
+            Ok(Response::from_json(&ApiResponse::success(response))?)
+        },
+        Err(e) => Ok(Response::from_json(&ApiResponse::<()>::error(format!("Failed to create API key: {}", e)))?
+            .with_status(500)),
+    }
 }
 
-pub async fn list_api_keys() -> impl IntoResponse {
-    (StatusCode::NOT_IMPLEMENTED, Json("TODO: Implement list_api_keys handler"))
+pub async fn list_api_keys(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    // TODO: Add admin authentication check
+    
+    let d1 = match ctx.env.d1("DB") {
+        Ok(db) => db,
+        Err(_) => {
+            return Ok(Response::from_json(&ApiResponse::<Vec<ApiKeyInfo>>::error("Database not configured".to_string()))?
+                .with_status(500));
+        }
+    };
+
+    let db = Database::new(d1);
+    
+    match db.list_api_keys().await {
+        Ok(keys) => {
+            let key_infos: Vec<ApiKeyInfo> = keys.into_iter().map(|k| ApiKeyInfo {
+                id: k.id,
+                client_name: k.client_name,
+                key_type: k.key_type,
+                last_used: k.last_used,
+                created_at: k.created_at,
+                active: k.active,
+            }).collect();
+            Ok(Response::from_json(&ApiResponse::success(key_infos))?)
+        },
+        Err(e) => Ok(Response::from_json(&ApiResponse::<()>::error(format!("Failed to list API keys: {}", e)))?
+            .with_status(500)),
+    }
 }
 
-pub async fn revoke_api_key(Path(_id): Path<String>) -> impl IntoResponse {
-    (StatusCode::NOT_IMPLEMENTED, Json("TODO: Implement revoke_api_key handler"))
+pub async fn revoke_api_key(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    // TODO: Add admin authentication check
+    
+    let id = match ctx.param("id") {
+        Some(id) => id,
+        None => {
+            return Ok(Response::from_json(&ApiResponse::<()>::error("Missing key ID".to_string()))?
+                .with_status(400));
+        }
+    };
+    
+    let d1 = match ctx.env.d1("DB") {
+        Ok(db) => db,
+        Err(_) => {
+            return Ok(Response::from_json(&ApiResponse::<()>::error("Database not configured".to_string()))?
+                .with_status(500));
+        }
+    };
+
+    let db = Database::new(d1);
+    
+    match db.revoke_api_key(id).await {
+        Ok(_) => Ok(Response::from_json(&ApiResponse::success(()))?),
+        Err(e) => Ok(Response::from_json(&ApiResponse::<()>::error(format!("Failed to revoke API key: {}", e)))?
+            .with_status(500)),
+    }
 }

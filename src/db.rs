@@ -33,7 +33,7 @@ impl Database {
             key_hash.into(),
             "Initial Admin Key".into(),
             "admin".into(),
-            now.into(),
+            (now as f64).into(),
         ])?
         .run()
         .await?;
@@ -54,7 +54,7 @@ impl Database {
                 "UPDATE api_keys SET last_used = ?1 WHERE key_hash = ?2"
             );
             let now = Utc::now().timestamp();
-            update_stmt.bind(&[now.into(), key_hash.into()])?.run().await?;
+            update_stmt.bind(&[(now as f64).into(), key_hash.into()])?.run().await?;
         }
         
         Ok(result)
@@ -78,7 +78,7 @@ impl Database {
             key_hash.into(),
             client_name.into(),
             key_type_str.into(),
-            now.into(),
+            (now as f64).into(),
         ])?
         .run()
         .await?;
@@ -134,8 +134,8 @@ impl Database {
             req.description.clone().into(),
             priority.into(),
             req.due_date.into(),
-            now.into(),
-            now.into(),
+            (now as f64).into(),
+            (now as f64).into(),
         ])?
         .run()
         .await?;
