@@ -1,17 +1,15 @@
 # Pali Server
 
-A self-hosted todo application backend built with Rust, Cloudflare Workers, and D1 database.
-
-**Pali** (from Toki Pona: "to do, work, make") - Simple, secure, self-hosted task management.
+Cloudflare Workers backend for the Pali todo management ecosystem.
 
 ## Features
 
-- API key-based authentication (no user accounts needed)
-- Admin and client API keys with different permission levels
-- Full CRUD operations for todos
-- Todo search functionality
-- API key rotation for security
-- Priority levels and due dates for todos
+- **Cloudflare Workers + D1**: Serverless API with global edge deployment
+- **Secure Authentication**: API key-based auth with admin/client roles
+- **One-Time Initialization**: Secure setup without hardcoded credentials
+- **Emergency Admin Reset**: Never get locked out of your server
+- **Full Todo API**: CRUD operations, search, priority levels, due dates
+- **Security Audit Logging**: Track authentication attempts and admin actions
 
 ## Setup
 
@@ -34,27 +32,86 @@ wrangler d1 migrations apply pali-database --local
 wrangler d1 migrations apply pali-database
 ```
 
-### 3. Configure Initial Admin Key
-
-Edit `wrangler.toml` and set a secure initial admin key:
-
-```toml
-[vars]
-INITIAL_ADMIN_KEY = "your-secure-admin-key-here"
-```
-
-### 4. Deploy
+### 3. Deploy
 
 ```bash
 # Deploy to Cloudflare Workers
 wrangler deploy
 ```
 
+### 4. Initialize Server
+
+After deployment, initialize the server to create your first admin key:
+
+```bash
+curl -X POST https://your-worker-url.workers.dev/initialize
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "...",
+    "client_name": "Initial Admin Key",
+    "key_type": "admin", 
+    "api_key": "pali_abc123...",  // SAVE THIS! Only shown once
+    "created_at": 1234567890
+  }
+}
+```
+
+⚠️ **Important**: Save the returned API key - it's only shown once!
+
+Subsequent calls return `409 Conflict` (server already initialized).
+
 ## API Documentation
 
 ### Authentication
 
-All API endpoints (except `/` and `/health`) require authentication via the `X-API-Key` header.
+All API endpoints (except `/`, `/health`, and `/initialize`) require authentication via the `X-API-Key` header.
+
+### Initialization Endpoints
+
+#### Initialize Server (One-Time Setup)
+```
+POST /initialize
+
+No authentication required (only works if server is uninitialized)
+
+Response:
+{
+  "success": true,
+  "data": {
+    "id": "...",
+    "client_name": "Initial Admin Key",
+    "key_type": "admin",
+    "api_key": "pali_...",  // Save this! Only shown once
+    "created_at": 1234567890
+  }
+}
+```
+
+#### Emergency Reinitialize (Admin Key Reset)
+```
+POST /reinitialize
+
+No authentication required (emergency reset - deactivates ALL admin keys)
+
+Response:
+{
+  "success": true,
+  "data": {
+    "id": "...",
+    "client_name": "Reinitialized Admin Key", 
+    "key_type": "admin",
+    "api_key": "pali_...",  // Save this! Only shown once
+    "created_at": 1234567890
+  }
+}
+```
+
+⚠️ **Emergency Use Only**: `/reinitialize` deactivates ALL existing admin keys and creates a new one. Use only when admin access is lost.
 
 ### Admin Endpoints
 
@@ -63,18 +120,15 @@ All API endpoints (except `/` and `/health`) require authentication via the `X-A
 POST /admin/keys/rotate
 X-API-Key: <current-admin-key>
 
+Status: 410 Gone (Deprecated)
 Response:
 {
-  "success": true,
-  "data": {
-    "id": "...",
-    "client_name": "Rotated Admin Key",
-    "key_type": "admin",
-    "api_key": "pali_...",  // Save this! Only shown once
-    "created_at": 1234567890
-  }
+  "success": false, 
+  "error": "Use POST /reinitialize for admin key rotation"
 }
 ```
+
+**Note**: This endpoint is deprecated. Use `POST /reinitialize` for admin key rotation.
 
 #### Create API Key
 ```
@@ -191,22 +245,47 @@ GET /todos/search?q=groceries
 X-API-Key: <any-valid-key>
 ```
 
-## Client Integration
+## Client Development
 
-Each client application should:
+### API Integration Requirements
 
-1. Store its API key securely (not hard-coded)
-2. Include the API key in the `X-API-Key` header for all requests
-3. Handle API responses checking the `success` field
-4. Implement proper error handling for network failures
+Client applications should:
 
-## Security Notes
+1. **Authentication**: Include API key in `X-API-Key` header for all requests
+2. **Response Handling**: Check `success` field in JSON responses  
+3. **Error Handling**: Handle HTTP status codes (401, 403, 404, 500)
+4. **Security**: Store API keys securely (never hard-coded)
 
-- The initial admin key should be removed from `wrangler.toml` after first use
-- Use the key rotation API regularly for admin keys
-- Each client should have its own API key
-- Revoke unused or compromised keys immediately
-- All API keys are hashed before storage (SHA-256)
+### Response Format
+
+All endpoints return JSON in this format:
+```json
+{
+  "success": boolean,
+  "data": T | null,
+  "error": string | null
+}
+```
+
+## Security Features
+
+### Authentication System
+- **Production-Ready**: All endpoints require valid API keys (except health checks)
+- **Role-Based Access**: Admin keys can manage API keys, client keys can only access todos
+- **Secure Storage**: API keys are SHA-256 hashed before database storage
+- **Request Logging**: All authentication attempts logged for security auditing
+
+### Key Management Best Practices
+- **No Hardcoded Keys**: Server initializes securely without hardcoded credentials
+- **One-Time Setup**: Initialize endpoint only works once, prevents replay attacks
+- **Emergency Reset**: Reinitialize endpoint for complete admin access recovery
+- **Individual Keys**: Each client/app should have its own unique API key
+- **Immediate Revocation**: Compromised keys can be revoked instantly via admin API
+
+### HTTP Security
+- **Status Codes**: Proper 401 (Unauthorized) and 403 (Forbidden) responses
+- **Error Messages**: Descriptive but secure error responses
+- **Audit Trail**: Security events logged for monitoring and compliance
 
 ## Development
 
