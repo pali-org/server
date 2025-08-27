@@ -19,16 +19,19 @@ A self-hosted todo application backend built with Rust, Cloudflare Workers, and 
 
 ```bash
 # Create the database
-npx wrangler d1 create pali-database
+wrangler d1 create pali-database
 
-# Copy the database_id from the output and update it in wrangler.toml
+# Copy the database_id from the output and update it in wrangler.toml under [[d1_databases]]
 ```
 
 ### 2. Run Database Migrations
 
 ```bash
-# Apply the schema to your database
-npx wrangler d1 execute pali-database --file=./schema.sql
+# Apply migrations to local database (for development)
+wrangler d1 migrations apply pali-database --local
+
+# Apply migrations to remote database (for production)
+wrangler d1 migrations apply pali-database
 ```
 
 ### 3. Configure Initial Admin Key
@@ -43,9 +46,8 @@ INITIAL_ADMIN_KEY = "your-secure-admin-key-here"
 ### 4. Deploy
 
 ```bash
-# Install dependencies and build
-npm install
-npm run deploy
+# Deploy to Cloudflare Workers
+wrangler deploy
 ```
 
 ## API Documentation
@@ -210,8 +212,11 @@ Each client application should:
 
 ```bash
 # Local development
-npx wrangler dev
+wrangler dev --local
+
+# Local development with remote D1 database
+wrangler dev
 
 # View logs
-npx wrangler tail
+wrangler tail
 ```

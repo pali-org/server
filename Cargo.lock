@@ -561,13 +561,23 @@ dependencies = [
  "console_error_panic_hook",
  "getrandom 0.2.16",
  "hex",
+ "pali-types",
  "rand",
  "serde",
  "serde_json",
  "sha2",
  "uuid",
+ "wasm-bindgen",
  "worker",
  "worker-macros",
+]
+
+[[package]]
+name = "pali-types"
+version = "0.1.0"
+source = "git+https://github.com/pali-org/types.git#d6be3b74dec13d6d02961ee62ab03dc92a87d196"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

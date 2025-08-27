@@ -6,6 +6,19 @@
 use worker::*;
 use crate::models::*;
 use crate::db::Database;
+use crate::auth::{validate_api_key_from_request, is_admin};
+
+// Security logging helper
+fn log_auth_attempt(method: &str, path: &str, client_name: Option<&str>, success: bool) {
+    let status = if success { "SUCCESS" } else { "FAILED" };
+    let client = client_name.unwrap_or("unknown");
+    console_log!("AUTH {}: {} {} - client: {}", status, method, path, client);
+}
+
+fn log_admin_action(action: &str, client_name: &str, target: Option<&str>) {
+    let target_info = target.map(|t| format!(" target: {}", t)).unwrap_or_default();
+    console_log!("ADMIN ACTION: {} - client: {}{}", action, client_name, target_info);
+}
 
 // Simple sync handlers for basic routes
 pub fn root(_: Request, _: RouteContext<()>) -> Result<Response> {
@@ -18,7 +31,18 @@ pub fn health_check(_: Request, _: RouteContext<()>) -> Result<Response> {
 
 // Async handlers for database operations
 pub async fn create_todo(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    // TODO: Add authentication check
+    // Validate API key
+    let auth = match validate_api_key_from_request(&req, &ctx.env).await {
+        Some(auth) => {
+            log_auth_attempt(req.method().to_string().as_str(), req.url()?.path(), Some(&auth.client_name), true);
+            auth
+        },
+        None => {
+            log_auth_attempt(req.method().to_string().as_str(), req.url()?.path(), None, false);
+            return Ok(Response::from_json(&ApiResponse::<()>::error("Invalid or missing API key".to_string()))?
+                .with_status(401));
+        }
+    };
     
     let body: CreateTodoRequest = match req.json().await {
         Ok(body) => body,
@@ -46,7 +70,14 @@ pub async fn create_todo(mut req: Request, ctx: RouteContext<()>) -> Result<Resp
 }
 
 pub async fn list_todos(req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    // TODO: Add authentication check
+    // Validate API key
+    let _auth = match validate_api_key_from_request(&req, &ctx.env).await {
+        Some(auth) => auth,
+        None => {
+            return Ok(Response::from_json(&ApiResponse::<Vec<Todo>>::error("Invalid or missing API key".to_string()))?
+                .with_status(401));
+        }
+    };
     
     // Parse query parameters manually
     let url = req.url()?;
@@ -72,7 +103,14 @@ pub async fn list_todos(req: Request, ctx: RouteContext<()>) -> Result<Response>
 }
 
 pub async fn search_todos(req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    // TODO: Add authentication check
+    // Validate API key
+    let _auth = match validate_api_key_from_request(&req, &ctx.env).await {
+        Some(auth) => auth,
+        None => {
+            return Ok(Response::from_json(&ApiResponse::<Vec<Todo>>::error("Invalid or missing API key".to_string()))?
+                .with_status(401));
+        }
+    };
     
     let url = req.url()?;
     let query = match url.query_pairs().find(|(key, _)| key == "q") {
@@ -100,8 +138,15 @@ pub async fn search_todos(req: Request, ctx: RouteContext<()>) -> Result<Respons
     }
 }
 
-pub async fn get_todo(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    // TODO: Add authentication check
+pub async fn get_todo(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    // Validate API key
+    let _auth = match validate_api_key_from_request(&req, &ctx.env).await {
+        Some(auth) => auth,
+        None => {
+            return Ok(Response::from_json(&ApiResponse::<Todo>::error("Invalid or missing API key".to_string()))?
+                .with_status(401));
+        }
+    };
     
     let id = match ctx.param("id") {
         Some(id) => id,
@@ -131,7 +176,14 @@ pub async fn get_todo(_req: Request, ctx: RouteContext<()>) -> Result<Response> 
 }
 
 pub async fn update_todo(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    // TODO: Add authentication check
+    // Validate API key
+    let _auth = match validate_api_key_from_request(&req, &ctx.env).await {
+        Some(auth) => auth,
+        None => {
+            return Ok(Response::from_json(&ApiResponse::<Todo>::error("Invalid or missing API key".to_string()))?
+                .with_status(401));
+        }
+    };
     
     let id = match ctx.param("id") {
         Some(id) => id,
@@ -168,8 +220,15 @@ pub async fn update_todo(mut req: Request, ctx: RouteContext<()>) -> Result<Resp
     }
 }
 
-pub async fn delete_todo(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    // TODO: Add authentication check
+pub async fn delete_todo(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    // Validate API key
+    let _auth = match validate_api_key_from_request(&req, &ctx.env).await {
+        Some(auth) => auth,
+        None => {
+            return Ok(Response::from_json(&ApiResponse::<()>::error("Invalid or missing API key".to_string()))?
+                .with_status(401));
+        }
+    };
     
     let id = match ctx.param("id") {
         Some(id) => id,
@@ -198,8 +257,15 @@ pub async fn delete_todo(_req: Request, ctx: RouteContext<()>) -> Result<Respons
     }
 }
 
-pub async fn toggle_todo(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    // TODO: Add authentication check
+pub async fn toggle_todo(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    // Validate API key
+    let _auth = match validate_api_key_from_request(&req, &ctx.env).await {
+        Some(auth) => auth,
+        None => {
+            return Ok(Response::from_json(&ApiResponse::<Todo>::error("Invalid or missing API key".to_string()))?
+                .with_status(401));
+        }
+    };
     
     let id = match ctx.param("id") {
         Some(id) => id,
@@ -232,12 +298,24 @@ pub async fn toggle_todo(_req: Request, ctx: RouteContext<()>) -> Result<Respons
 pub async fn rotate_admin_key(_req: Request, _ctx: RouteContext<()>) -> Result<Response> {
     // TODO: Add admin authentication check
     
-    Ok(Response::from_json(&ApiResponse::<()>::error("Not implemented yet".to_string()))?
-        .with_status(501))
+    Ok(Response::from_json(&ApiResponse::<()>::error("Use POST /reinitialize for admin key rotation".to_string()))?
+        .with_status(410)) // Gone - use new endpoint
 }
 
 pub async fn create_api_key(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    // TODO: Add admin authentication check
+    // Validate admin API key
+    let auth = match validate_api_key_from_request(&req, &ctx.env).await {
+        Some(auth) => auth,
+        None => {
+            return Ok(Response::from_json(&ApiResponse::<()>::error("Invalid or missing API key".to_string()))?
+                .with_status(401));
+        }
+    };
+    
+    if !is_admin(&auth) {
+        return Ok(Response::from_json(&ApiResponse::<()>::error("Admin privileges required".to_string()))?
+            .with_status(403));
+    }
     
     let body: CreateApiKeyRequest = match req.json().await {
         Ok(body) => body,
@@ -275,8 +353,20 @@ pub async fn create_api_key(mut req: Request, ctx: RouteContext<()>) -> Result<R
     }
 }
 
-pub async fn list_api_keys(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    // TODO: Add admin authentication check
+pub async fn list_api_keys(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    // Validate admin API key
+    let auth = match validate_api_key_from_request(&req, &ctx.env).await {
+        Some(auth) => auth,
+        None => {
+            return Ok(Response::from_json(&ApiResponse::<()>::error("Invalid or missing API key".to_string()))?
+                .with_status(401));
+        }
+    };
+    
+    if !is_admin(&auth) {
+        return Ok(Response::from_json(&ApiResponse::<()>::error("Admin privileges required".to_string()))?
+            .with_status(403));
+    }
     
     let d1 = match ctx.env.d1("DB") {
         Ok(db) => db,
@@ -305,8 +395,20 @@ pub async fn list_api_keys(_req: Request, ctx: RouteContext<()>) -> Result<Respo
     }
 }
 
-pub async fn revoke_api_key(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    // TODO: Add admin authentication check
+pub async fn revoke_api_key(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    // Validate admin API key
+    let auth = match validate_api_key_from_request(&req, &ctx.env).await {
+        Some(auth) => auth,
+        None => {
+            return Ok(Response::from_json(&ApiResponse::<()>::error("Invalid or missing API key".to_string()))?
+                .with_status(401));
+        }
+    };
+    
+    if !is_admin(&auth) {
+        return Ok(Response::from_json(&ApiResponse::<()>::error("Admin privileges required".to_string()))?
+            .with_status(403));
+    }
     
     let id = match ctx.param("id") {
         Some(id) => id,
@@ -329,6 +431,100 @@ pub async fn revoke_api_key(_req: Request, ctx: RouteContext<()>) -> Result<Resp
     match db.revoke_api_key(id).await {
         Ok(_) => Ok(Response::from_json(&ApiResponse::success(()))?),
         Err(e) => Ok(Response::from_json(&ApiResponse::<()>::error(format!("Failed to revoke API key: {}", e)))?
+            .with_status(500)),
+    }
+}
+
+// One-time initialization endpoint - creates the first admin key
+pub async fn initialize_server(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let d1 = match ctx.env.d1("DB") {
+        Ok(db) => db,
+        Err(_) => {
+            return Ok(Response::from_json(&ApiResponse::<()>::error("Database not configured".to_string()))?
+                .with_status(500));
+        }
+    };
+
+    let db = Database::new(d1);
+    
+    // Check if already initialized
+    match db.is_initialized().await {
+        Ok(true) => {
+            return Ok(Response::from_json(&ApiResponse::<()>::error("Server already initialized".to_string()))?
+                .with_status(409)); // Conflict
+        },
+        Ok(false) => {
+            // Proceed with initialization
+        },
+        Err(e) => {
+            return Ok(Response::from_json(&ApiResponse::<()>::error(format!("Failed to check initialization status: {}", e)))?
+                .with_status(500));
+        }
+    }
+    
+    // Generate the first admin key
+    let api_key = generate_api_key();
+    let key_hash = hash_api_key(&api_key);
+    
+    match db.initialize_with_admin_key(key_hash).await {
+        Ok(id) => {
+            let response = ApiKeyResponse {
+                id,
+                client_name: "Initial Admin Key".to_string(),
+                key_type: KeyType::Admin,
+                api_key,
+                created_at: chrono::Utc::now().timestamp(),
+            };
+            Ok(Response::from_json(&ApiResponse::success(response))?)
+        },
+        Err(e) => Ok(Response::from_json(&ApiResponse::<()>::error(format!("Failed to initialize server: {}", e)))?
+            .with_status(500)),
+    }
+}
+
+// Emergency reinitialize endpoint - deactivates ALL admin keys and creates new one
+pub async fn reinitialize_server(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let d1 = match ctx.env.d1("DB") {
+        Ok(db) => db,
+        Err(_) => {
+            return Ok(Response::from_json(&ApiResponse::<()>::error("Database not configured".to_string()))?
+                .with_status(500));
+        }
+    };
+
+    let db = Database::new(d1);
+    
+    // Check if database is initialized (has any admin keys)
+    match db.is_initialized().await {
+        Ok(false) => {
+            return Ok(Response::from_json(&ApiResponse::<()>::error("Server not initialized. Use POST /initialize first".to_string()))?
+                .with_status(400));
+        },
+        Ok(true) => {
+            // Proceed with reinitialization
+        },
+        Err(e) => {
+            return Ok(Response::from_json(&ApiResponse::<()>::error(format!("Failed to check initialization status: {}", e)))?
+                .with_status(500));
+        }
+    }
+    
+    // Generate new admin key
+    let api_key = generate_api_key();
+    let key_hash = hash_api_key(&api_key);
+    
+    match db.reinitialize_admin_keys(key_hash).await {
+        Ok(id) => {
+            let response = ApiKeyResponse {
+                id,
+                client_name: "Reinitialized Admin Key".to_string(),
+                key_type: KeyType::Admin,
+                api_key,
+                created_at: chrono::Utc::now().timestamp(),
+            };
+            Ok(Response::from_json(&ApiResponse::success(response))?)
+        },
+        Err(e) => Ok(Response::from_json(&ApiResponse::<()>::error(format!("Failed to reinitialize server: {}", e)))?
             .with_status(500)),
     }
 }

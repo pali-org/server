@@ -5,12 +5,11 @@ compatibility_date = "2025-08-27"
 [[d1_databases]]
 binding = "DB"
 database_name = "pali-database"
-database_id = "YOUR_DATABASE_ID"
+database_id = "ccc5df9d-7805-45cd-aae3-69604d74d3e2"
 
 [vars]
-# Initial admin API key for first-time setup
-# Generate a secure key and set this value
-INITIAL_ADMIN_KEY = "change-this-to-a-secure-key"
+# No environment variables needed for initialization
+# Use POST /initialize endpoint for one-time setup
 
 [build]
 command = "cargo install -q worker-build && worker-build --release"

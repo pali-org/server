@@ -1,41 +1,10 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-// Core data models for the Pali todo server
-// TODO: Consider adding validation traits (e.g., title length limits, priority bounds)
+// Re-export shared types
+pub use pali_types::*;
 
-// Main todo item structure
-// TODO: Add optional tags/categories field
-// TODO: Consider adding recurrence patterns for repeating todos
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Todo {
-    pub id: String,
-    pub title: String,
-    pub description: Option<String>,
-    pub completed: bool,
-    pub priority: i32,
-    pub due_date: Option<i64>,
-    pub created_at: i64,
-    pub updated_at: i64,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CreateTodoRequest {
-    pub title: String,
-    pub description: Option<String>,
-    pub priority: Option<i32>,
-    pub due_date: Option<i64>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct UpdateTodoRequest {
-    pub title: Option<String>,
-    pub description: Option<String>,
-    pub completed: Option<bool>,
-    pub priority: Option<i32>,
-    pub due_date: Option<i64>,
-}
-
+// Server-specific API key model with key_hash field
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ApiKey {
     pub id: String,
@@ -45,63 +14,6 @@ pub struct ApiKey {
     pub last_used: Option<i64>,
     pub created_at: i64,
     pub active: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum KeyType {
-    Admin,
-    Client,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CreateApiKeyRequest {
-    pub client_name: String,
-    pub key_type: KeyType,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ApiKeyResponse {
-    pub id: String,
-    pub client_name: String,
-    pub key_type: KeyType,
-    pub api_key: String,
-    pub created_at: i64,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ApiKeyInfo {
-    pub id: String,
-    pub client_name: String,
-    pub key_type: KeyType,
-    pub last_used: Option<i64>,
-    pub created_at: i64,
-    pub active: bool,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ApiResponse<T> {
-    pub success: bool,
-    pub data: Option<T>,
-    pub error: Option<String>,
-}
-
-impl<T> ApiResponse<T> {
-    pub fn success(data: T) -> Self {
-        Self {
-            success: true,
-            data: Some(data),
-            error: None,
-        }
-    }
-
-    pub fn error(message: String) -> Self {
-        Self {
-            success: false,
-            data: None,
-            error: Some(message),
-        }
-    }
 }
 
 // TODO: Consider using a more secure key generation method

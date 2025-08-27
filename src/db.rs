@@ -4,9 +4,75 @@
 // TODO: Add database migration system
 
 use worker::*;
+use wasm_bindgen::JsValue;
 use crate::models::{Todo, ApiKey, KeyType, CreateTodoRequest, UpdateTodoRequest};
 use uuid::Uuid;
 use chrono::Utc;
+use serde::{Deserialize, Serialize};
+
+// WORKAROUND: D1 serialization issue with booleans
+// Issue: https://github.com/cloudflare/workers-rs/issues/387
+// D1 databases serialize booleans as floating point numbers (0.0/1.0) 
+// which causes "invalid type: floating point 0.0, expected a boolean" errors
+// when deserializing directly into structs with bool fields.
+// Solution: Use intermediate row struct with i32, convert to bool manually.
+#[derive(Debug, Serialize, Deserialize)]
+struct TodoRow {
+    id: String,
+    title: String,
+    description: Option<String>,
+    completed: i32,  // 0 = false, 1 = true (D1 limitation)
+    priority: i32,
+    due_date: Option<i64>,
+    created_at: i64,
+    updated_at: i64,
+}
+
+impl From<TodoRow> for Todo {
+    fn from(row: TodoRow) -> Self {
+        Todo {
+            id: row.id,
+            title: row.title,
+            description: row.description,
+            completed: row.completed != 0,  // Convert i32 to bool (D1 workaround)
+            priority: row.priority,
+            due_date: row.due_date,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
+}
+
+// WORKAROUND: ApiKey serialization pattern (same D1 boolean issue)
+// Apply same workaround pattern as TodoRow for consistent handling
+#[derive(Debug, Serialize, Deserialize)]
+struct ApiKeyRow {
+    id: String,
+    key_hash: String,
+    client_name: String,
+    key_type: String,  // Store as string, convert to enum
+    last_used: Option<i64>,
+    created_at: i64,
+    active: i32,  // 0 = false, 1 = true (D1 limitation)
+}
+
+impl From<ApiKeyRow> for ApiKey {
+    fn from(row: ApiKeyRow) -> Self {
+        ApiKey {
+            id: row.id,
+            key_hash: row.key_hash,
+            client_name: row.client_name,
+            key_type: match row.key_type.to_lowercase().as_str() {
+                "admin" => KeyType::Admin,
+                "client" => KeyType::Client,
+                _ => KeyType::Client,  // Default fallback
+            },
+            last_used: row.last_used,
+            created_at: row.created_at,
+            active: row.active != 0,  // Convert i32 to bool
+        }
+    }
+}
 
 pub struct Database {
     d1: D1Database,
@@ -17,28 +83,72 @@ impl Database {
         Self { d1 }
     }
 
-    // TODO: Replace with proper migration system
-    // TODO: Add check for existing admin keys before creating
-    pub async fn init_admin_key(&self, key_hash: String) -> Result<()> {
+    fn generate_id() -> String {
+        Uuid::new_v4().to_string()
+    }
+
+    fn current_timestamp() -> i64 {
+        Utc::now().timestamp()
+    }
+
+    fn timestamp_to_f64(timestamp: i64) -> JsValue {
+        (timestamp as f64).into()
+    }
+
+    fn option_timestamp_to_jsvalue(timestamp: Option<i64>) -> JsValue {
+        match timestamp {
+            Some(ts) => (ts as f64).into(),
+            None => JsValue::NULL,
+        }
+    }
+
+    // Check if the database has been initialized (has any admin keys)
+    pub async fn is_initialized(&self) -> Result<bool> {
         let stmt = self.d1.prepare(
-            "INSERT OR IGNORE INTO api_keys (id, key_hash, client_name, key_type, created_at, active) 
+            "SELECT COUNT(*) as count FROM api_keys WHERE key_type = 'admin'"
+        );
+        
+        let result = stmt.bind(&[])?
+            .first::<serde_json::Value>(None)
+            .await?;
+            
+        if let Some(value) = result {
+            if let Some(count) = value.get("count") {
+                if let Some(count_num) = count.as_f64() {
+                    return Ok(count_num > 0.0);
+                }
+            }
+        }
+        
+        Ok(false)
+    }
+
+    // Initialize the database with the first admin key (one-time operation)
+    pub async fn initialize_with_admin_key(&self, key_hash: String) -> Result<String> {
+        // Double-check that we're not already initialized
+        if self.is_initialized().await? {
+            return Err(worker::Error::RustError("Database already initialized".to_string()));
+        }
+        
+        let stmt = self.d1.prepare(
+            "INSERT INTO api_keys (id, key_hash, client_name, key_type, created_at, active) 
              VALUES (?1, ?2, ?3, ?4, ?5, 1)"
         );
         
-        let id = Uuid::new_v4().to_string();
-        let now = Utc::now().timestamp();
+        let id = Self::generate_id();
+        let now = Self::current_timestamp();
         
         stmt.bind(&[
-            id.into(),
+            id.clone().into(),
             key_hash.into(),
             "Initial Admin Key".into(),
             "admin".into(),
-            (now as f64).into(),
+            Self::timestamp_to_f64(now),
         ])?
         .run()
         .await?;
         
-        Ok(())
+        Ok(id)
     }
 
     pub async fn validate_api_key(&self, key_hash: &str) -> Result<Option<ApiKey>> {
@@ -47,7 +157,8 @@ impl Database {
              FROM api_keys WHERE key_hash = ?1 AND active = 1"
         );
         
-        let result = stmt.bind(&[key_hash.into()])?.first::<ApiKey>(None).await?;
+        let result = stmt.bind(&[key_hash.into()])?.first::<ApiKeyRow>(None).await?;
+        let result = result.map(|row| row.into());
         
         if result.is_some() {
             let update_stmt = self.d1.prepare(
@@ -96,6 +207,19 @@ impl Database {
         Ok(id)
     }
 
+    // Reinitialize: deactivate ALL admin keys and create a new one (emergency rotation)
+    pub async fn reinitialize_admin_keys(&self, new_key_hash: String) -> Result<String> {
+        // Deactivate all existing admin keys
+        let deactivate_stmt = self.d1.prepare(
+            "UPDATE api_keys SET active = 0 WHERE key_type = 'admin'"
+        );
+        deactivate_stmt.bind(&[])?.run().await?;
+        
+        // Create new admin key
+        let id = self.create_api_key(new_key_hash, "Reinitialized Admin Key".to_string(), KeyType::Admin).await?;
+        Ok(id)
+    }
+
     pub async fn list_api_keys(&self) -> Result<Vec<ApiKey>> {
         let stmt = self.d1.prepare(
             "SELECT id, key_hash, client_name, key_type, last_used, created_at, active 
@@ -104,7 +228,8 @@ impl Database {
         
         let results = stmt.bind(&[])?.all().await?;
         
-        let keys: Vec<ApiKey> = results.results::<ApiKey>()?;
+        let rows: Vec<ApiKeyRow> = results.results::<ApiKeyRow>()?;
+        let keys: Vec<ApiKey> = rows.into_iter().map(|row| row.into()).collect();
         
         Ok(keys)
     }
@@ -128,12 +253,20 @@ impl Database {
              VALUES (?1, ?2, ?3, 0, ?4, ?5, ?6, ?7)"
         );
         
+        // WORKAROUND: D1 NULL handling issue  
+        // Issue: https://github.com/cloudflare/workers-rs/issues/678
+        // D1 binding doesn't support Option<T> directly - None becomes "undefined"
+        // which causes "Type 'undefined' not supported" errors.
+        // Solution: Manually convert None to JsValue::NULL for database compatibility.
         stmt.bind(&[
             id.clone().into(),
             req.title.clone().into(),
-            req.description.clone().into(),
+            req.description.clone().unwrap_or_default().into(),
             priority.into(),
-            req.due_date.into(),
+            match req.due_date {
+                Some(date) => (date as f64).into(),
+                None => JsValue::NULL,  // Required for D1 NULL handling
+            },
             (now as f64).into(),
             (now as f64).into(),
         ])?
@@ -169,14 +302,16 @@ impl Database {
         };
         
         let results = query.all().await?;
-        let todos: Vec<Todo> = results.results::<Todo>()?;
+        let rows: Vec<TodoRow> = results.results::<TodoRow>()?;
+        let todos: Vec<Todo> = rows.into_iter().map(|row| row.into()).collect();
         
         Ok(todos)
     }
 
     pub async fn get_todo(&self, id: &str) -> Result<Option<Todo>> {
         let stmt = self.d1.prepare("SELECT * FROM todos WHERE id = ?1");
-        stmt.bind(&[id.into()])?.first::<Todo>(None).await
+        let result = stmt.bind(&[id.into()])?.first::<TodoRow>(None).await?;
+        Ok(result.map(|row| row.into()))
     }
 
     pub async fn update_todo(&self, id: &str, req: UpdateTodoRequest) -> Result<Option<Todo>> {
@@ -208,11 +343,14 @@ impl Database {
             
             stmt.bind(&[
                 todo.title.clone().into(),
-                todo.description.clone().into(),
+                todo.description.clone().unwrap_or_default().into(),
                 (todo.completed as i32).into(),
                 todo.priority.into(),
-                todo.due_date.into(),
-                todo.updated_at.into(),
+                match todo.due_date {
+                    Some(date) => (date as f64).into(),
+                    None => JsValue::NULL,  // D1 NULL handling workaround
+                },
+                (todo.updated_at as f64).into(),
                 id.into(),
             ])?
             .run()
@@ -235,7 +373,7 @@ impl Database {
             
             stmt.bind(&[
                 (todo.completed as i32).into(),
-                todo.updated_at.into(),
+                (todo.updated_at as f64).into(),
                 id.into(),
             ])?
             .run()
@@ -265,7 +403,8 @@ impl Database {
         let search_pattern = format!("%{}%", query);
         let results = stmt.bind(&[search_pattern.into()])?.all().await?;
         
-        let todos: Vec<Todo> = results.results::<Todo>()?;
+        let rows: Vec<TodoRow> = results.results::<TodoRow>()?;
+        let todos: Vec<Todo> = rows.into_iter().map(|row| row.into()).collect();
         
         Ok(todos)
     }
