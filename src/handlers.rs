@@ -4,6 +4,7 @@
 // TODO: Implement rate limiting per API key
 
 use worker::*;
+#[allow(clippy::wildcard_imports)]
 use crate::models::*;
 use crate::db::Database;
 use crate::auth::{validate_api_key_from_request, is_admin};
@@ -15,10 +16,6 @@ fn log_auth_attempt(method: &str, path: &str, client_name: Option<&str>, success
     console_log!("AUTH {}: {} {} - client: {}", status, method, path, client);
 }
 
-fn log_admin_action(action: &str, client_name: &str, target: Option<&str>) {
-    let target_info = target.map(|t| format!(" target: {}", t)).unwrap_or_default();
-    console_log!("ADMIN ACTION: {} - client: {}{}", action, client_name, target_info);
-}
 
 // Simple sync handlers for basic routes
 pub fn root(_: Request, _: RouteContext<()>) -> Result<Response> {
@@ -32,7 +29,7 @@ pub fn health_check(_: Request, _: RouteContext<()>) -> Result<Response> {
 // Async handlers for database operations
 pub async fn create_todo(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
     // Validate API key
-    let auth = match validate_api_key_from_request(&req, &ctx.env).await {
+    let _auth = match validate_api_key_from_request(&req, &ctx.env).await {
         Some(auth) => {
             log_auth_attempt(req.method().to_string().as_str(), req.url()?.path(), Some(&auth.client_name), true);
             auth

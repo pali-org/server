@@ -20,7 +20,7 @@ pub struct ApiKey {
 // TODO: Add configurable key prefixes (e.g., 'pali_admin_', 'pali_client_')
 pub fn generate_api_key() -> String {
     let uuid = Uuid::new_v4();
-    format!("pali_{}", uuid.to_string().replace("-", ""))
+    format!("pali_{}", uuid.to_string().replace('-', ""))
 }
 
 // TODO: Consider adding salt to hash function for additional security

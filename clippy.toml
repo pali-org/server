@@ -1,0 +1,4 @@
+# Clippy configuration for Pali Server
+
+# Allow wildcard imports for specific crates (worker is designed as a prelude)  
+allowed-wildcard-imports = ["worker"]

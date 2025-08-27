@@ -64,8 +64,7 @@ impl From<ApiKeyRow> for ApiKey {
             client_name: row.client_name,
             key_type: match row.key_type.to_lowercase().as_str() {
                 "admin" => KeyType::Admin,
-                "client" => KeyType::Client,
-                _ => KeyType::Client,  // Default fallback
+                _ => KeyType::Client,  // Default to Client for any non-admin type
             },
             last_used: row.last_used,
             created_at: row.created_at,
@@ -91,15 +90,9 @@ impl Database {
         Utc::now().timestamp()
     }
 
+    #[allow(clippy::cast_precision_loss)] // D1 requires f64 for timestamps
     fn timestamp_to_f64(timestamp: i64) -> JsValue {
         (timestamp as f64).into()
-    }
-
-    fn option_timestamp_to_jsvalue(timestamp: Option<i64>) -> JsValue {
-        match timestamp {
-            Some(ts) => (ts as f64).into(),
-            None => JsValue::NULL,
-        }
     }
 
     // Check if the database has been initialized (has any admin keys)
@@ -158,7 +151,7 @@ impl Database {
         );
         
         let result = stmt.bind(&[key_hash.into()])?.first::<ApiKeyRow>(None).await?;
-        let result = result.map(|row| row.into());
+        let result = result.map(Into::into);
         
         if result.is_some() {
             let update_stmt = self.d1.prepare(
@@ -229,7 +222,7 @@ impl Database {
         let results = stmt.bind(&[])?.all().await?;
         
         let rows: Vec<ApiKeyRow> = results.results::<ApiKeyRow>()?;
-        let keys: Vec<ApiKey> = rows.into_iter().map(|row| row.into()).collect();
+        let keys: Vec<ApiKey> = rows.into_iter().map(Into::into).collect();
         
         Ok(keys)
     }
@@ -291,7 +284,7 @@ impl Database {
                 let stmt = self.d1.prepare(
                     "SELECT * FROM todos WHERE completed = ?1 ORDER BY priority DESC, created_at DESC"
                 );
-                stmt.bind(&[(completed as i32).into()])?
+                stmt.bind(&[i32::from(completed).into()])?
             },
             None => {
                 let stmt = self.d1.prepare(
@@ -303,7 +296,7 @@ impl Database {
         
         let results = query.all().await?;
         let rows: Vec<TodoRow> = results.results::<TodoRow>()?;
-        let todos: Vec<Todo> = rows.into_iter().map(|row| row.into()).collect();
+        let todos: Vec<Todo> = rows.into_iter().map(Into::into).collect();
         
         Ok(todos)
     }
@@ -311,7 +304,7 @@ impl Database {
     pub async fn get_todo(&self, id: &str) -> Result<Option<Todo>> {
         let stmt = self.d1.prepare("SELECT * FROM todos WHERE id = ?1");
         let result = stmt.bind(&[id.into()])?.first::<TodoRow>(None).await?;
-        Ok(result.map(|row| row.into()))
+        Ok(result.map(Into::into))
     }
 
     pub async fn update_todo(&self, id: &str, req: UpdateTodoRequest) -> Result<Option<Todo>> {
@@ -344,7 +337,7 @@ impl Database {
             stmt.bind(&[
                 todo.title.clone().into(),
                 todo.description.clone().unwrap_or_default().into(),
-                (todo.completed as i32).into(),
+                i32::from(todo.completed).into(),
                 todo.priority.into(),
                 match todo.due_date {
                     Some(date) => (date as f64).into(),
@@ -372,7 +365,7 @@ impl Database {
             );
             
             stmt.bind(&[
-                (todo.completed as i32).into(),
+                i32::from(todo.completed).into(),
                 (todo.updated_at as f64).into(),
                 id.into(),
             ])?
@@ -400,11 +393,11 @@ impl Database {
              ORDER BY priority DESC, created_at DESC"
         );
         
-        let search_pattern = format!("%{}%", query);
+        let search_pattern = format!("%{query}%");
         let results = stmt.bind(&[search_pattern.into()])?.all().await?;
         
         let rows: Vec<TodoRow> = results.results::<TodoRow>()?;
-        let todos: Vec<Todo> = rows.into_iter().map(|row| row.into()).collect();
+        let todos: Vec<Todo> = rows.into_iter().map(Into::into).collect();
         
         Ok(todos)
     }
