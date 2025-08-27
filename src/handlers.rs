@@ -1,7 +1,7 @@
 // HTTP endpoint handlers for the Pali todo server API
+// Authentication is fully integrated with security logging
 // TODO: Add request validation middleware
 // TODO: Implement rate limiting per API key
-// TODO: Add comprehensive error logging
 
 use worker::*;
 use crate::models::*;
@@ -296,7 +296,7 @@ pub async fn toggle_todo(req: Request, ctx: RouteContext<()>) -> Result<Response
 
 // Admin handlers
 pub async fn rotate_admin_key(_req: Request, _ctx: RouteContext<()>) -> Result<Response> {
-    // TODO: Add admin authentication check
+    // Admin authentication check deprecated - endpoint replaced with /reinitialize
     
     Ok(Response::from_json(&ApiResponse::<()>::error("Use POST /reinitialize for admin key rotation".to_string()))?
         .with_status(410)) // Gone - use new endpoint

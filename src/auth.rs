@@ -1,8 +1,7 @@
 // API key authentication logic for Pali server
-// TODO: Integrate authentication checks into Workers router handlers
+// Authentication is fully integrated into all handlers
 // TODO: Add rate limiting per API key
 // TODO: Implement key usage analytics/metrics
-// TODO: Add request logging for security auditing
 
 use worker::*;
 use crate::models::{KeyType, hash_api_key};
@@ -15,7 +14,7 @@ pub struct AuthContext {
 }
 
 // Helper function to validate API key from request headers
-// TODO: Integrate this into handler functions
+// Integrated into all protected handlers
 pub async fn validate_api_key_from_request(req: &Request, env: &Env) -> Option<AuthContext> {
     let api_key = req.headers().get("X-API-Key").ok()??;
     let key_hash = hash_api_key(&api_key);
