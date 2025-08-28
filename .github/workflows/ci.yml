@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test and Lint
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+        targets: wasm32-unknown-unknown
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - name: Check code formatting
+      run: cargo fmt --all -- --check
+
+    - name: Run clippy
+      run: cargo clippy --all-targets --all-features -- -D warnings
+
+    - name: Run clippy (WASM target)
+      run: cargo clippy --target wasm32-unknown-unknown --all-features -- -D warnings
+
+    - name: Build
+      run: cargo build --all-features
+
+    - name: Build (WASM target)
+      run: cargo build --target wasm32-unknown-unknown --all-features
+
+    - name: Run tests
+      run: cargo test --all-features
+
+    - name: Build WASM binary (release)
+      run: cargo build --target wasm32-unknown-unknown --release
+
+    - name: Check WASM binary size
+      run: |
+        BINARY_SIZE=$(stat -c%s "target/wasm32-unknown-unknown/release/pali_server.wasm")
+        echo "WASM binary size: $BINARY_SIZE bytes"
+        if [ "$BINARY_SIZE" -gt 5000000 ]; then
+          echo "⚠️  Warning: Binary size exceeds 5MB, may hit Cloudflare limits"
+          exit 1
+        else
+          echo "✅ Binary size within Cloudflare Workers limits"
+        fi
+
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install cargo-audit
+      run: cargo install cargo-audit
+
+    - name: Run security audit
+      run: cargo audit
