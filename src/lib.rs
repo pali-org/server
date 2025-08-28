@@ -22,7 +22,8 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .post_async("/todos", handlers::create_todo)
         .get_async("/todos", handlers::list_todos) 
         .get_async("/todos/search", handlers::search_todos)
-        .get_async("/todos/:id", handlers::get_todo)
+        .get_async("/todos/resolve/:prefix", handlers::resolve_todo_prefix)
+        .get_async("/todos/:id", handlers::get_todo) // Keep parameterized routes last
         .put_async("/todos/:id", handlers::update_todo)
         .delete_async("/todos/:id", handlers::delete_todo)
         .patch_async("/todos/:id/toggle", handlers::toggle_todo)

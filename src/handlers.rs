@@ -291,6 +291,88 @@ pub async fn toggle_todo(req: Request, ctx: RouteContext<()>) -> Result<Response
     }
 }
 
+pub async fn resolve_todo_prefix(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    // Validate API key
+    let _auth = match validate_api_key_from_request(&req, &ctx.env).await {
+        Some(auth) => {
+            log_auth_attempt(req.method().to_string().as_str(), req.url()?.path(), Some(&auth.client_name), true);
+            auth
+        },
+        None => {
+            log_auth_attempt(req.method().to_string().as_str(), req.url()?.path(), None, false);
+            return Ok(Response::from_json(&ApiResponse::<()>::error("Invalid or missing API key".to_string()))?
+                .with_status(401));
+        }
+    };
+    
+    let prefix = match ctx.param("prefix") {
+        Some(prefix) => prefix,
+        None => {
+            return Ok(Response::from_json(&ApiResponse::<()>::error("Missing prefix parameter".to_string()))?
+                .with_status(400));
+        }
+    };
+    
+    // Validate prefix length (minimum 2 characters to avoid too many matches)
+    if prefix.len() < 2 {
+        return Ok(Response::from_json(&ApiResponse::<()>::error("Prefix must be at least 2 characters long".to_string()))?
+            .with_status(400));
+    }
+    
+    let d1 = match ctx.env.d1("DB") {
+        Ok(db) => db,
+        Err(_) => {
+            return Ok(Response::from_json(&ApiResponse::<IdResolutionResponse>::error("Database not configured".to_string()))?
+                .with_status(500));
+        }
+    };
+
+    let db = Database::new(d1);
+    
+    match db.resolve_id_prefix(prefix).await {
+        Ok(matches) => {
+            match matches.len() {
+                0 => {
+                    // No matches found
+                    Ok(Response::from_json(&ApiResponse::<()>::error(format!("No todo found with prefix '{}'", prefix)))?
+                        .with_status(404))
+                },
+                1 => {
+                    // Exactly one match - return the full ID
+                    let (full_id, _title) = &matches[0];
+                    let response = IdResolutionResponse {
+                        full_id: full_id.clone(),
+                    };
+                    Ok(Response::from_json(&ApiResponse::success(response))?)
+                },
+                _ => {
+                    // Multiple matches - return ambiguous error with details
+                    let match_details: Vec<String> = matches.iter()
+                        .take(3) // Limit to first 3 matches for readability
+                        .map(|(id, title)| {
+                            let short_id = &id[..std::cmp::min(8, id.len())]; // Show first 8 chars
+                            format!("{} ({})", short_id, title)
+                        })
+                        .collect();
+                    
+                    let error_msg = format!(
+                        "Ambiguous prefix '{}' matches {} todos: {}{}",
+                        prefix,
+                        matches.len(),
+                        match_details.join(", "),
+                        if matches.len() > 3 { ", ..." } else { "" }
+                    );
+                    
+                    Ok(Response::from_json(&ApiResponse::<()>::error(error_msg))?
+                        .with_status(409)) // Conflict status for ambiguous matches
+                }
+            }
+        },
+        Err(e) => Ok(Response::from_json(&ApiResponse::<()>::error(format!("Failed to resolve prefix: {}", e)))?
+            .with_status(500)),
+    }
+}
+
 // Admin handlers
 pub async fn rotate_admin_key(_req: Request, _ctx: RouteContext<()>) -> Result<Response> {
     // Admin authentication check deprecated - endpoint replaced with /reinitialize

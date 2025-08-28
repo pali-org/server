@@ -73,6 +73,13 @@ impl From<ApiKeyRow> for ApiKey {
     }
 }
 
+// Row struct for ID resolution queries (consistent with other D1 patterns)
+#[derive(Debug, Serialize, Deserialize)]
+struct IdTitleRow {
+    id: String,
+    title: String,
+}
+
 pub struct Database {
     d1: D1Database,
 }
@@ -190,16 +197,6 @@ impl Database {
         Ok(id)
     }
 
-    pub async fn rotate_admin_key(&self, old_key_hash: &str, new_key_hash: String) -> Result<String> {
-        let tx = self.d1.prepare(
-            "UPDATE api_keys SET active = 0 WHERE key_hash = ?1 AND key_type = 'admin'"
-        );
-        tx.bind(&[old_key_hash.into()])?.run().await?;
-        
-        let id = self.create_api_key(new_key_hash, "Rotated Admin Key".to_string(), KeyType::Admin).await?;
-        Ok(id)
-    }
-
     // Reinitialize: deactivate ALL admin keys and create a new one (emergency rotation)
     pub async fn reinitialize_admin_keys(&self, new_key_hash: String) -> Result<String> {
         // Deactivate all existing admin keys
@@ -254,7 +251,10 @@ impl Database {
         stmt.bind(&[
             id.clone().into(),
             req.title.clone().into(),
-            req.description.clone().unwrap_or_default().into(),
+            match req.description.clone() {
+                Some(desc) => desc.into(),
+                None => JsValue::NULL,  // Consistent NULL handling
+            },
             priority.into(),
             match req.due_date {
                 Some(date) => (date as f64).into(),
@@ -336,7 +336,10 @@ impl Database {
             
             stmt.bind(&[
                 todo.title.clone().into(),
-                todo.description.clone().unwrap_or_default().into(),
+                match todo.description.clone() {
+                    Some(desc) => desc.into(),
+                    None => JsValue::NULL,  // Consistent NULL handling
+                },
                 i32::from(todo.completed).into(),
                 todo.priority.into(),
                 match todo.due_date {
@@ -400,5 +403,28 @@ impl Database {
         let todos: Vec<Todo> = rows.into_iter().map(Into::into).collect();
         
         Ok(todos)
+    }
+
+    // Resolve partial ID prefix to full ID for efficient client-side operations
+    // Returns matches with id and title for disambiguation
+    pub async fn resolve_id_prefix(&self, prefix: &str) -> Result<Vec<(String, String)>> {
+        let stmt = self.d1.prepare(
+            "SELECT id, title FROM todos 
+             WHERE id LIKE ?1 
+             ORDER BY created_at DESC"
+        );
+        
+        // Escape SQL wildcards to treat them as literal characters
+        let escaped_prefix = prefix.replace('%', r"\%").replace('_', r"\_");
+        let prefix_pattern = format!("{}%", escaped_prefix);
+        let results = stmt.bind(&[prefix_pattern.into()])?.all().await?;
+        
+        // Use structured deserialization for consistency and safety
+        let rows: Vec<IdTitleRow> = results.results::<IdTitleRow>()?;
+        let matches: Vec<(String, String)> = rows.into_iter()
+            .map(|row| (row.id, row.title))
+            .collect();
+        
+        Ok(matches)
     }
 }
