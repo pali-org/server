@@ -565,7 +565,7 @@ checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 
 [[package]]
 name = "pali-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "console_error_panic_hook",
@@ -586,7 +586,7 @@ dependencies = [
 [[package]]
 name = "pali-types"
 version = "0.1.0"
-source = "git+https://github.com/pali-org/types.git#d6be3b74dec13d6d02961ee62ab03dc92a87d196"
+source = "git+https://github.com/pali-org/types.git#c1da11327a06dc9ce73a689d2d14caca5a14ceba"
 dependencies = [
  "serde",
 ]
